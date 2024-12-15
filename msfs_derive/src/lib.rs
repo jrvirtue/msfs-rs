@@ -7,7 +7,7 @@ use syn::{
     parse_macro_input, Expr, Ident, ItemFn, ItemStruct, Lit, Meta, Token, Type,
 };
 
-
+//test
 /// Declare a standalone module.
 /// ```rs
 /// #[standalone_module]
