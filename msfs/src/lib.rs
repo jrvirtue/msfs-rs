@@ -28,7 +28,7 @@
 //!   "-Clink-arg=--export=free",
 //! ]
 //! ```
-
+#![allow(warnings)]
 mod msfs;
 pub mod sim_connect;
 pub mod sys;

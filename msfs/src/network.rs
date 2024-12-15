@@ -5,8 +5,24 @@ use std::{
     ffi::{self, CStr, CString},
     ptr, slice,
 };
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+type RegisteredCallback = Box<dyn Fn(String, i32) + Send + Sync>;
 
 type NetworkCallback = Box<dyn FnOnce(NetworkRequest, i32)>;
+// Global registry for storing instances
+lazy_static::lazy_static! {
+    static ref CALLBACK_REGISTRY: Mutex<HashMap<i32, Arc<RegisteredCallback>>> = Mutex::new(HashMap::new());
+}
+fn id_exists(id: i32) -> bool {
+    let registry = CALLBACK_REGISTRY.lock().unwrap();
+    registry.contains_key(&id)
+}
+fn register_callback(id: i32, callback: RegisteredCallback) {
+    let mut registry = CALLBACK_REGISTRY.lock().unwrap();
+    registry.insert(id, Arc::new(callback));
+}
 
 /// A builder to build network requests
 pub struct NetworkRequestBuilder<'a> {
@@ -14,6 +30,7 @@ pub struct NetworkRequestBuilder<'a> {
     headers: Vec<CString>,
     data: Option<&'a mut [u8]>,
     callback: Option<Box<NetworkCallback>>,
+    registered_callback: Option<RegisteredCallback>,
 }
 impl<'a> NetworkRequestBuilder<'a> {
     /// Create a new network request
@@ -23,9 +40,14 @@ impl<'a> NetworkRequestBuilder<'a> {
             headers: vec![],
             data: None,
             callback: None,
+            registered_callback: None,
         })
     }
-
+    pub fn with_registered_callback(mut self, callback: RegisteredCallback) -> Self {
+        self.registered_callback = Some(callback);
+        self
+    }
+    
     /// Set a HTTP header
     pub fn with_header(mut self, header: &str) -> Option<Self> {
         self.headers.push(CString::new(header).ok()?);
@@ -72,8 +94,13 @@ impl<'a> NetworkRequestBuilder<'a> {
         ) -> sys::FsNetworkRequestId,
     ) -> Option<NetworkRequest> {
         // SAFETY: we need a *mut i8 for the FsNetworkHttpRequestParam struct but this should be fine.
-        let raw_post_field =
-            post_field.map_or(ptr::null_mut(), |f| f.as_c_str().as_ptr() as *mut i8);
+        let raw_post_field = post_field.map_or(ptr::null_mut(),|f| f
+            .as_bytes()   // &str -> &[u8]
+            .iter()       // iterate over the bytes
+            .map(|&b| b as i8) // convert each byte to i8
+            .collect::<Vec<i8>>()
+            .as_mut_ptr() as *mut i8
+        );
         // SAFETY: Because the struct in the C code is not defined as const char* we need to cast
         // the *const into *mut which should be safe because the function should not change it anyway
         let mut headers = self
@@ -101,11 +128,19 @@ impl<'a> NetworkRequestBuilder<'a> {
                 callback_data,
             )
         };
+        if (request_id != 0) {
+            if (id_exists(request_id as i32)) {
+                println!("request_id: {}", request_id);
+            }
+        }
         if request_id == 0 {
             // Free the callback
             let _: Box<NetworkCallback> = unsafe { Box::from_raw(callback_data as *mut _) };
             None
         } else {
+            if let Some(callback) = self.registered_callback.take() {
+                register_callback(request_id as i32, callback);
+            }
             Some(NetworkRequest(request_id))
         }
     }
@@ -115,9 +150,44 @@ impl<'a> NetworkRequestBuilder<'a> {
         status_code: i32,
         user_data: *mut ffi::c_void,
     ) {
-        if !user_data.is_null() {
+        if id_exists(request_id as i32) {
+            let nr = NetworkRequest(request_id);
+            let data_size: usize = nr.data_size();
+            let code: i32 = nr.error_code();
+            let registry = CALLBACK_REGISTRY.lock().unwrap();
+            let request_id32 = request_id as i32;
+            if let Some(callback) = registry.get(&request_id32) {
+                if (data_size <= 0) {
+                    callback("".to_string(),code);
+                }
+                else{
+                    let data = unsafe { sys::fsNetworkHttpRequestGetData(request_id) };
+                    if !data.is_null() && nr.data_size() > 0 {
+                        unsafe {
+                            let bytes = slice::from_raw_parts(data, nr.data_size() as usize);
+                            let mut bytesI8: Vec<u8> = bytes.into_iter().map(|b| *b as u8).collect();
+                            if !bytesI8.ends_with(&[0]) {
+                                bytesI8.push(0);
+                            }
+                            let c_str = CString::from_vec_unchecked(bytesI8);
+                            let response_string : String = c_str.into_string().unwrap();
+                            let response_string :String = response_string.trim_end_matches(char::from(0)).to_string();
+                            callback(response_string, code);
+                        }
+                    }else{
+                        callback("".to_string(),code);
+                    }
+                }
+            } else {
+                println!("Callback not found for request_id: {}", request_id);
+            }
+            
+        } else if !user_data.is_null() {
             let callback: Box<NetworkCallback> = unsafe { Box::from_raw(user_data as *mut _) };
             callback(NetworkRequest(request_id), status_code);
+        }
+        else{
+            eprintln!("callback not found for network request");
         }
     }
 }
