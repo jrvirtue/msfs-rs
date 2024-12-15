@@ -13,7 +13,7 @@ libc = "0.2"
 lazy_static = "1.5.0"
 
 [build-dependencies]
-bindgen = "0.66"
+bindgen = "0.69"
 msfs_sdk = { path = "../msfs_sdk", version = "0.1.0" }
 cc = "1.0"
 
