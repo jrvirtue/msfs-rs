@@ -9,12 +9,12 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-type RegisteredCallback = Rc<RefCell<dyn FnMut(String, i32)>>;
+type RegisteredCallback = Rc<RefCell<dyn Fn(String, i32)>>;
 
 type NetworkCallback = Box<dyn FnOnce(NetworkRequest, i32)>;
 // Global registry for storing instances
 thread_local! {
-    static CALLBACK_REGISTRY: RefCell<HashMap<i32, Rc<RefCell<dyn FnMut(String, i32)>>>> = RefCell::new(HashMap::new());
+    static CALLBACK_REGISTRY: RefCell<HashMap<i32, Rc<RefCell<dyn Fn(String, i32)>>>> = RefCell::new(HashMap::new());
 }
 fn id_exists(id: i32) -> bool {
     CALLBACK_REGISTRY.with(|registry| registry.borrow().contains_key(&id))
