@@ -6,22 +6,23 @@ use std::{
     ptr, slice,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::cell::RefCell;
 
-type RegisteredCallback = Box<dyn FnMut(String, i32) + Send + Sync>;
+type RegisteredCallback = Rc<RefCell<dyn FnMut(String, i32)>>;
 
 type NetworkCallback = Box<dyn FnOnce(NetworkRequest, i32)>;
 // Global registry for storing instances
-lazy_static::lazy_static! {
-    static ref CALLBACK_REGISTRY: Mutex<HashMap<i32, Arc<Mutex<Box<dyn FnMut(String, i32) + Send + Sync>>>>> = Mutex::new(HashMap::new());
+thread_local! {
+    static CALLBACK_REGISTRY: RefCell<HashMap<i32, Rc<RefCell<dyn FnMut(String, i32)>>>> = RefCell::new(HashMap::new());
 }
 fn id_exists(id: i32) -> bool {
-    let registry = CALLBACK_REGISTRY.lock().unwrap();
-    registry.contains_key(&id)
+    CALLBACK_REGISTRY.with(|registry| registry.borrow().contains_key(&id))
 }
 fn register_callback(id: i32, callback: RegisteredCallback) {
-    let mut registry = CALLBACK_REGISTRY.lock().unwrap();
-    registry.insert(id, Arc::new(Mutex::new(callback)));
+    CALLBACK_REGISTRY.with(|registry| {
+        registry.borrow_mut().insert(id, callback);
+    });
 }
 
 /// A builder to build network requests
@@ -154,34 +155,36 @@ impl<'a> NetworkRequestBuilder<'a> {
             let nr = NetworkRequest(request_id);
             let data_size: usize = nr.data_size();
             let code: i32 = nr.error_code();
-            let registry = CALLBACK_REGISTRY.lock().unwrap();
-            let request_id32 = request_id as i32;
-            if let Some(callback) = registry.get(&request_id32) {
-                if (data_size <= 0) {
-                    callback.lock().unwrap()("".to_string().clone(), code);
-                }
-                else{
-                    let data = unsafe { sys::fsNetworkHttpRequestGetData(request_id) };
-                    if !data.is_null() && nr.data_size() > 0 {
-                        unsafe {
-                            let bytes = slice::from_raw_parts(data, nr.data_size() as usize);
-                            let mut bytesI8: Vec<u8> = bytes.into_iter().map(|b| *b as u8).collect();
-                            if !bytesI8.ends_with(&[0]) {
-                                bytesI8.push(0);
-                            }
-                            let c_str = CString::from_vec_unchecked(bytesI8);
-                            let response_string : String = c_str.into_string().unwrap();
-                            let response_string :String = response_string.trim_end_matches(char::from(0)).to_string();
-                            callback.lock().unwrap()(response_string.clone(), code);
-                        }
-                    }else{
-                        callback.lock().unwrap()("".to_string().clone(), code);
+            CALLBACK_REGISTRY.with(|registry| {
+                let request_id32 = request_id as i32;
+                if let Some(callback) = registry.borrow().get(&request_id32) {
+                    let mut cb = callback.borrow_mut();
+                    if (data_size <= 0) {
+                        cb("".to_string(), code);
                     }
+                    else{
+                        let data = unsafe { sys::fsNetworkHttpRequestGetData(request_id) };
+                        if !data.is_null() && nr.data_size() > 0 {
+                            unsafe {
+                                let bytes = slice::from_raw_parts(data, nr.data_size() as usize);
+                                let mut bytesI8: Vec<u8> = bytes.into_iter().map(|b| *b as u8).collect();
+                                if !bytesI8.ends_with(&[0]) {
+                                    bytesI8.push(0);
+                                }
+                                let c_str = CString::from_vec_unchecked(bytesI8);
+                                let response_string : String = c_str.into_string().unwrap();
+                                let response_string :String = response_string.trim_end_matches(char::from(0)).to_string();
+                                cb(response_string.clone(), code);
+                            }
+                        }else{
+                            cb("".to_string(), code);
+                        }
+                    }
+                } else {
+                    println!("Callback not found for request_id: {}", request_id);
                 }
-            } else {
-                println!("Callback not found for request_id: {}", request_id);
-            }
-            
+            });
+
         } else if !user_data.is_null() {
             let callback: Box<NetworkCallback> = unsafe { Box::from_raw(user_data as *mut _) };
             callback(NetworkRequest(request_id), status_code);
