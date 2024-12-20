@@ -8,12 +8,12 @@ use std::{
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-type RegisteredCallback = Box<dyn Fn(String, i32) + Send + Sync>;
+type RegisteredCallback = Box<dyn FnMut(String, i32) + Send + Sync>;
 
 type NetworkCallback = Box<dyn FnOnce(NetworkRequest, i32)>;
 // Global registry for storing instances
 lazy_static::lazy_static! {
-    static ref CALLBACK_REGISTRY: Mutex<HashMap<i32, Arc<RegisteredCallback>>> = Mutex::new(HashMap::new());
+    static ref CALLBACK_REGISTRY: Mutex<HashMap<i32, Arc<Mutex<Box<dyn FnMut(String, i32) + Send + Sync>>>>> = Mutex::new(HashMap::new());
 }
 fn id_exists(id: i32) -> bool {
     let registry = CALLBACK_REGISTRY.lock().unwrap();
@@ -21,7 +21,7 @@ fn id_exists(id: i32) -> bool {
 }
 fn register_callback(id: i32, callback: RegisteredCallback) {
     let mut registry = CALLBACK_REGISTRY.lock().unwrap();
-    registry.insert(id, Arc::new(callback));
+    registry.insert(id, Arc::new(Mutex::new(callback)));
 }
 
 /// A builder to build network requests
@@ -158,7 +158,7 @@ impl<'a> NetworkRequestBuilder<'a> {
             let request_id32 = request_id as i32;
             if let Some(callback) = registry.get(&request_id32) {
                 if (data_size <= 0) {
-                    callback("".to_string(),code);
+                    callback.lock().unwrap()("".to_string().clone(), code);
                 }
                 else{
                     let data = unsafe { sys::fsNetworkHttpRequestGetData(request_id) };
@@ -172,10 +172,10 @@ impl<'a> NetworkRequestBuilder<'a> {
                             let c_str = CString::from_vec_unchecked(bytesI8);
                             let response_string : String = c_str.into_string().unwrap();
                             let response_string :String = response_string.trim_end_matches(char::from(0)).to_string();
-                            callback(response_string, code);
+                            callback.lock().unwrap()(response_string.clone(), code);
                         }
                     }else{
-                        callback("".to_string(),code);
+                        callback.lock().unwrap()("".to_string().clone(), code);
                     }
                 }
             } else {
