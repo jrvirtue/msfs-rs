@@ -287,7 +287,7 @@ impl<'a> SimConnect<'a> {
             map_err(sys::SimConnect_SetNotificationGroupPriority(
                 self.handle,
                 0,
-                sys::SIMCONNECT_GROUP_PRIORITY_HIGHEST_MASKABLE,
+                sys::SIMCONNECT_GROUP_PRIORITY_HIGHEST,
             ))?;
         }
         Ok(event_id)
