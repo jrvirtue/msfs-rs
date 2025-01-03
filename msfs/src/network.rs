@@ -110,17 +110,11 @@ impl<'a> NetworkRequestBuilder<'a> {
         // let mut raw_post_field_buf: Vec<i8> = raw_post_field_u8.iter().map(|&b| b as i8).collect();
         // let raw_post_field: *mut i8 = raw_post_field_buf.as_mut_ptr();
         
-        let raw_post_field: *mut i8 = match post_field{
-            Some(f) => {
-                let raw_post_field_u8: Vec<u8> = f.as_bytes_with_nul().to_vec();
-                let mut raw_post_field_buf: Vec<i8> = raw_post_field_u8.iter().map(|&b| b as i8).collect();
-                raw_post_field_buf.as_mut_ptr();
-                let raw_post_field: *mut i8 = raw_post_field_buf.as_mut_ptr();
-                raw_post_field
-            },
-            None => ptr::null_mut(),
-        };
-        
+        let copied_post_field = post_field.as_ref().map(|cs| {
+            // Create a new CString from the bytes of the existing CString
+            CString::new(cs.as_bytes()).expect("Failed to copy CString")
+        });
+        let raw_post_field = copied_post_field.as_ref().map_or(ptr::null(), |cs| cs.as_ptr() )as *mut i8;
         
         // SAFETY: Because the struct in the C code is not defined as const char* we need to cast
         // the *const into *mut which should be safe because the function should not change it anyway
