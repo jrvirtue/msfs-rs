@@ -5,7 +5,7 @@ use quote::{format_ident, quote};
 use std::collections::HashMap;
 use syn::{
     parse::{Parse, ParseStream, Result as SynResult},
-    parse_macro_input, Expr, Ident, ItemFn, ItemStruct, Lit, Meta, Token, Type,
+    parse_macro_input, Expr, Ident, ItemFn, ItemStruct, Lit, Meta, Token, Type,TypeArray,
 };
 
 /// Declare a standalone module.
@@ -149,6 +149,12 @@ pub fn gauge(args: TokenStream, item: TokenStream) -> TokenStream {
     TokenStream::from(output)
 }
 
+fn get_array_type_string(array: &TypeArray) -> String {
+    let elem_type = &array.elem;
+    let len_expr = &array.len;
+    format!("[{}; {}]", quote!(#elem_type), quote!(#len_expr))
+}
+
 fn parse_struct_fields(
     input: &mut ItemStruct,
     attributes: &[&str],
@@ -171,7 +177,8 @@ fn parse_struct_fields(
         if let Some(get_type) = get_type {
             let ty = match &field.ty {
                 Type::Path(p) => p.path.get_ident().unwrap().to_string(),
-                _ => panic!("Unsupported type"),
+                Type::Array(array) => get_array_type_string(array),
+                _ => panic!("Unsupported type {:?}", field.ty),
             };
 
             meta.insert("type".to_string(), get_type(ty.as_str()).to_string());
@@ -231,6 +238,18 @@ fn parse_struct_fields(
 ///
 /// sim.add_data_definition::<ControlSurfaces>();
 /// ```
+/// 
+/// pub const SIMCONNECT_DATATYPE_SIMCONNECT_DATATYPE_FLOAT64: SIMCONNECT_DATATYPE = 4;
+// pub const SIMCONNECT_DATATYPE_SIMCONNECT_DATATYPE_STRING8: SIMCONNECT_DATATYPE = 5;
+// pub const SIMCONNECT_DATATYPE_SIMCONNECT_DATATYPE_STRING32: SIMCONNECT_DATATYPE = 6;
+// pub const SIMCONNECT_DATATYPE_SIMCONNECT_DATATYPE_STRING64: SIMCONNECT_DATATYPE = 7;
+// pub const SIMCONNECT_DATATYPE_SIMCONNECT_DATATYPE_STRING128: SIMCONNECT_DATATYPE = 8;
+// pub const SIMCONNECT_DATATYPE_SIMCONNECT_DATATYPE_STRING256: SIMCONNECT_DATATYPE = 9;
+// pub const SIMCONNECT_DATATYPE_SIMCONNECT_DATATYPE_STRING260: SIMCONNECT_DATATYPE = 10;
+// /// 
+/// 
+/// 
+
 #[proc_macro_attribute]
 pub fn sim_connect_data_definition(_args: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as ItemStruct);
@@ -245,6 +264,11 @@ pub fn sim_connect_data_definition(_args: TokenStream, item: TokenStream) -> Tok
             "i64" => "INT64",
             "f32" => "FLOAT32",
             "f64" => "FLOAT64",
+            "[u8; 8]" => "STRING8",
+            "[u8; 32]" => "STRING32",
+            "[u8; 64]" => "STRING64",
+            "[u8; 128]" => "STRING128",
+            "[u8; 256]" => "STRING256",
             "DataXYZ" => "XYZ",
             _ => panic!("Unsupported type {}", ty),
         }),
