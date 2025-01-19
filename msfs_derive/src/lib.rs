@@ -178,7 +178,7 @@ fn parse_struct_fields(
             let ty = match &field.ty {
                 Type::Path(p) => p.path.get_ident().unwrap().to_string(),
                 Type::Array(array) => get_array_type_string(array),
-                _ => panic!("Unsupported type {:?}", field.ty),
+                _ => panic!("Unsupported type"),
             };
 
             meta.insert("type".to_string(), get_type(ty.as_str()).to_string());

@@ -563,6 +563,11 @@ macro_rules! recv {
                 Quit
             ),
             (
+                SIMCONNECT_RECV_ID_SIMCONNECT_RECV_ID_EVENT_FRAME,
+                SIMCONNECT_RECV_EVENT_FRAME,
+                Frame
+            ),
+            (
                 SIMCONNECT_RECV_ID_SIMCONNECT_RECV_ID_EVENT,
                 SIMCONNECT_RECV_EVENT,
                 Event
